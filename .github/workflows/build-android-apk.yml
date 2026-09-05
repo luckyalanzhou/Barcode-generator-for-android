@@ -1,0 +1,188 @@
+name: Build Android APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # 工作流自身提交版本号时会产生一个 [skip ci] 推送；该推送不能取消正在打包的原构建。
+  cancel-in-progress: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+
+jobs:
+  build:
+    # 自动版本提交仅更新仓库版本号，不应再执行一次构建或发布。
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    name: Assemble signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: android
+        shell: bash
+
+    env:
+      GRADLE_OPTS: >-
+        -Dorg.gradle.jvmargs=-Xmx4g
+        -Dfile.encoding=UTF-8
+        -Dorg.gradle.caching=true
+        -Dorg.gradle.parallel=true
+        -Dkotlin.incremental=true
+        -Dkapt.incremental.apt=true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # 保留依赖和构建缓存，减少后续运行的下载和 Kotlin 编译时间。
+          cache-cleanup: never
+          add-job-summary: on-failure
+
+      - name: Increment app version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          version_code="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' app/build.gradle.kts | head -n 1)"
+          version_name="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          test -n "$version_code" && test -n "$version_name"
+
+          IFS=. read -r major minor patch <<< "$version_name"
+          next_code=$((version_code + 1))
+          next_patch=$((patch + 1))
+          next_name="${major}.${minor}.${next_patch}"
+
+          sed -i -E "0,/^[[:space:]]*versionCode[[:space:]]*=.*/s//    versionCode = ${next_code}/" app/build.gradle.kts
+          sed -i -E "0,/^[[:space:]]*versionName[[:space:]]*=.*/s//    versionName = \"${next_name}\"/" app/build.gradle.kts
+
+          # 版本递增属于仓库维护记录，沿用项目维护者身份，避免贡献者列表出现机器人。
+          git config user.name "luckyalanzhou"
+          git config user.email "zhiminzhou1@gmail.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: bump app version to ${next_name} [skip ci]"
+          git push origin HEAD:main
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Read app version
+        id: app-version
+        run: |
+          set -euo pipefail
+
+          version_name="$(
+            sed -nE \
+              's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' \
+              app/build.gradle.kts |
+            head -n 1
+          )"
+
+          test -n "$version_name" || {
+            echo "::error::versionName not found"
+            exit 1
+          }
+
+          echo "version=$version_name" >> "$GITHUB_OUTPUT"
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          test -n "$KEYSTORE_BASE64" || {
+            echo "::error::Missing RELEASE_KEYSTORE_BASE64 secret"
+            exit 1
+          }
+          test -n "$KEYSTORE_PASSWORD" || {
+            echo "::error::Missing RELEASE_KEYSTORE_PASSWORD secret"
+            exit 1
+          }
+          test -n "$KEY_ALIAS" || {
+            echo "::error::Missing RELEASE_KEY_ALIAS secret"
+            exit 1
+          }
+          test -n "$KEY_PASSWORD" || {
+            echo "::error::Missing RELEASE_KEY_PASSWORD secret"
+            exit 1
+          }
+          printf '%s' "$KEYSTORE_BASE64" |
+            base64 --decode > release.jks
+
+          test -s release.jks
+          chmod 600 release.jks
+
+      - name: Build signed release APK
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/android/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            --build-cache \
+            --parallel \
+            --max-workers=4 \
+            --stacktrace
+
+      - name: Prepare release APK
+        env:
+          VERSION_NAME: ${{ steps.app-version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          source_apk="app/build/outputs/apk/release/app-release.apk"
+          target_apk="app/build/outputs/apk/release/BarcodeGenerator${VERSION_NAME}.apk"
+
+          test -f "$source_apk" || {
+            echo "::error::Release APK not found"
+            exit 1
+          }
+
+          mv "$source_apk" "$target_apk"
+          ls -lh "$target_apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BarcodeGenerator${{ steps.app-version.outputs.version }}-build${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/BarcodeGenerator${{ steps.app-version.outputs.version }}.apk
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v${{ steps.app-version.outputs.version }}.${{ github.run_number }}
+          name: BarcodeGenerator ${{ steps.app-version.outputs.version }}
+          generate_release_notes: true
+          files: android/app/build/outputs/apk/release/BarcodeGenerator${{ steps.app-version.outputs.version }}.apk
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove temporary keystore
+        if: always()
+        run: rm -f release.jks

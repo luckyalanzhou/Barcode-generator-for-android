@@ -1,0 +1,15 @@
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape>
+            <!-- 未选中项按下时不再闪现整块大背景，避免破坏悬浮玻璃层次。 -->
+            <solid android:color="#00000000" />
+            <corners android:radius="23dp" />
+        </shape>
+    </item>
+    <item>
+        <shape>
+            <solid android:color="#00000000" />
+            <corners android:radius="23dp" />
+        </shape>
+    </item>
+</selector>
