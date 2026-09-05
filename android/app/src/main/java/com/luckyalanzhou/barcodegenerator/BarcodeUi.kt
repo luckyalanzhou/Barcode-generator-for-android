@@ -1665,13 +1665,8 @@ internal fun MainActivity.showFireworksEasterEgg() {
     }
     val fireworks = InlineFireworksView(this)
     overlay.addView(fireworks, FrameLayout.LayoutParams(-1, -1))
-    val close = TextView(this).apply {
-        text = "×"; textSize = 30f; gravity = Gravity.CENTER; includeFontPadding = false
-        setTextColor(0xffedf6ff.toInt()); background = glassButtonBackground()
-        setOnClickListener { host.removeView(overlay) }
-        contentDescription = "关闭烟花"
-    }
-    overlay.addView(close, FrameLayout.LayoutParams(dp(46), dp(46), Gravity.TOP or Gravity.END).apply { topMargin = dp(18); rightMargin = dp(18) })
+    fireworksOverlay?.let { previous -> (previous.parent as? ViewGroup)?.removeView(previous) }
+    fireworksOverlay = overlay
     host.addView(overlay, ViewGroup.LayoutParams(-1, -1))
 }
 

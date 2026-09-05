@@ -19,6 +19,7 @@ import java.net.URL
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.widget.*
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.BinaryBitmap
@@ -79,6 +80,7 @@ data class FavoriteGroup(
 )
 
 class MainActivity : AppCompatActivity() {
+    internal var fireworksOverlay: View? = null
     internal val formats = listOf(
         "Code 128-B" to BarcodeFormat.CODE_128, "QR Code" to BarcodeFormat.QR_CODE,
         "Code 39" to BarcodeFormat.CODE_39, "EAN-13" to BarcodeFormat.EAN_13,
@@ -225,6 +227,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onBackPressed() {
+        fireworksOverlay?.let { overlay ->
+            (overlay.parent as? ViewGroup)?.removeView(overlay)
+            fireworksOverlay = null
+            return
+        }
         when (page) {
             "settings" -> { page = settingsReturnPage; render() }
             "favoriteDetail" -> { page = "favorites"; render() }
