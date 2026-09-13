@@ -1434,12 +1434,15 @@ internal fun MainActivity.showLanShareQrDialog() {
     val bitmap = Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).also { image -> for (x in 0 until matrix.width) for (y in 0 until matrix.height) image.setPixel(x, y, if (matrix[x, y]) qrForeground else qrBackground) }
     val box = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(12), dp(14), dp(12), dp(10))
+        // 二维码弹窗只保留必要的安全留白，减少左右白边；弹窗本身仍保留圆角和系统最小宽度。
+        gravity = Gravity.CENTER_HORIZONTAL
+        setPadding(0, dp(14), 0, dp(10))
         addView(ImageView(this@showLanShareQrDialog).apply {
             setImageBitmap(bitmap)
             contentDescription = "局域网分享二维码"
             setBackgroundColor(qrBackground)
-        }, LinearLayout.LayoutParams(-1, dp(240)))
+            scaleType = ImageView.ScaleType.CENTER
+        }, LinearLayout.LayoutParams(dp(240), dp(240)))
         addView(LinearLayout(this@showLanShareQrDialog).apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(TextView(this@showLanShareQrDialog).apply {
@@ -1460,7 +1463,7 @@ internal fun MainActivity.showLanShareQrDialog() {
                     toast("已复制局域网传输地址")
                 }
             }, LinearLayout.LayoutParams(dp(42), dp(42)))
-        }, LinearLayout.LayoutParams(-1, dp(42)))
+        }, LinearLayout.LayoutParams(dp(240), dp(42)))
     }
     val dialog = AlertDialog.Builder(this).setView(box).create()
     dialog.setCanceledOnTouchOutside(true)
